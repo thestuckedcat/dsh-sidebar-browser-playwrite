@@ -48,6 +48,7 @@ export interface TabInfo {
 /** PNG capture of a page or element. */
 export interface ScreenshotCapture {
   readonly mime: 'image/png'
+  readonly url: string
   readonly bytes: Uint8Array
 }
 
@@ -61,7 +62,7 @@ export interface BrowserSession {
   /** Navigate the active page and return the post-navigation snapshot. */
   navigate(url: string, waitUntil: LoadState, signal?: AbortSignal): Promise<BrowserSnapshot>
   /** Snapshot the active page without changing it. */
-  snapshot(opts?: { readonly interactiveOnly?: boolean }): Promise<BrowserSnapshot>
+  snapshot(opts?: { readonly interactiveOnly?: boolean }, signal?: AbortSignal): Promise<BrowserSnapshot>
   /** Click the element referenced by the latest snapshot. */
   click(ref: string, signal?: AbortSignal): Promise<BrowserSnapshot>
   /** Replace the referenced input's value and return the new snapshot. */
@@ -77,21 +78,21 @@ export interface BrowserSession {
   /** Wait a bounded duration, letting lazy content arrive. */
   wait(ms: number, signal?: AbortSignal): Promise<void>
   /** List open tabs. */
-  tabs(): Promise<readonly TabInfo[]>
+  tabs(signal?: AbortSignal): Promise<readonly TabInfo[]>
   /** Activate the tab at the given index. */
   switchTab(index: number, signal?: AbortSignal): Promise<BrowserSnapshot>
   /** Open a new tab and navigate it. */
   openTab(url: string, waitUntil: LoadState, signal?: AbortSignal): Promise<BrowserSnapshot>
-  /** Close the tab at the given index; the last tab resets to a blank page. */
+  /** Close the tab at the given index. Navigation opens a new page when none remain. */
   closeTab(index: number, signal?: AbortSignal): Promise<void>
   /** Capture a PNG of the page or referenced element. */
   screenshot(opts: { readonly fullPage?: boolean; readonly ref?: string } | undefined, signal?: AbortSignal): Promise<ScreenshotCapture>
   /** Extract the page's bounded data: text, links, forms, frames. */
-  pageData(): Promise<unknown>
+  pageData(signal?: AbortSignal): Promise<unknown>
   /** Evaluate one JavaScript expression and return its JSON result. */
   evaluate(expression: string, signal?: AbortSignal): Promise<unknown>
   /** Close the session; the provider forgets its browser context. */
-  close(): Promise<void>
+  close(signal?: AbortSignal): Promise<void>
 }
 
 /**

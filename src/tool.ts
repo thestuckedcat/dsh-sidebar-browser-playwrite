@@ -9,16 +9,17 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
+import { defineTool, type InferValue, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
 // Type-only: makes the ctx.browser declaration merge visible to this module.
 import type {} from './service.ts'
 import { BrowserError } from './errors.ts'
 import { renderSnapshot } from './snapshot-render.ts'
 import type { BrowserSession, BrowserSnapshot, LoadState } from './types.ts'
+
+type JsonValue = InferValue<{ type: 'json' }>
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'browser-tool'
@@ -50,7 +51,7 @@ export interface ToolConfig {
 }
 
 /** Schemastery validation for {@link ToolConfig}. */
-export const Config: z<ToolConfig> = z.object({
+export const Config = z.object({
   toolPrefix: z.string().default('browser_'),
   allowEvaluate: z.boolean().default(false),
   maxWaitMs: z.number().default(60000),
@@ -61,7 +62,7 @@ export const Config: z<ToolConfig> = z.object({
     maxInputChars: z.number().default(20000),
     maxOutputTokens: z.number().default(2000),
   }),
-})
+}) as unknown as z<ToolConfig>
 
 /** Canonical snapshot value: bounded facts plus the rendered tree. */
 interface SnapshotValue {
@@ -246,7 +247,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
       + 'The snapshot lists visible elements with stable ref= identifiers for later click/fill calls.',
     parameters: {
       url: { type: 'string', required: true, description: 'Absolute http(s) URL to open.' },
-      waitFor: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'Load condition to wait for. Defaults to load.' },
+      waitFor: { type: 'string', enum: ['load', 'domcontentloaded'], description: 'Electron waits for the complete load.' },
     },
     output: { schema: SNAPSHOT_SCHEMA, render: renderSnapshotValue },
     async execute(args, exec) {
@@ -267,7 +268,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
     async execute(args, exec) {
       const session = await acquire(exec)
       const interactiveOnly = args.interactiveOnly ?? config.interactiveOnlyDefault
-      return snapshotValue(await session.snapshot({ interactiveOnly }))
+      return snapshotValue(await session.snapshot({ interactiveOnly }, exec.signal))
     },
   }))
 
@@ -376,7 +377,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
     output: { schema: TABS_SCHEMA, render: renderTabsValue },
     async execute(_args, exec) {
       const session = await acquire(exec)
-      const tabs = await session.tabs()
+      const tabs = await session.tabs(exec.signal)
       return { tabs: tabs.map(tab => ({ index: tab.index, url: tab.url, title: tab.title })) }
     },
   }))
@@ -399,7 +400,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
     description: 'Open a new tab at the given URL and return its snapshot.',
     parameters: {
       url: { type: 'string', required: true, description: 'Absolute http(s) URL to open in the new tab.' },
-      waitFor: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'Load condition to wait for. Defaults to load.' },
+      waitFor: { type: 'string', enum: ['load', 'domcontentloaded'], description: 'Electron waits for the complete load.' },
     },
     output: { schema: SNAPSHOT_SCHEMA, render: renderSnapshotValue },
     async execute(args, exec) {
@@ -411,7 +412,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
 
   ctx.tools.register(defineTool({
     name: p('close_tab'),
-    description: 'Close the tab at the given index. Closing the last tab resets it to a blank page.',
+    description: 'Close the tab at the given index. Navigate again to open a new page when no tabs remain.',
     parameters: {
       index: { type: 'integer', required: true, description: 'Tab index from ' + p('tabs') + '.' },
     },
@@ -428,7 +429,7 @@ export function apply(ctx: Context, config: ToolConfig): void {
     description: 'Capture a PNG screenshot of the current page (or the referenced element) and store it '
       + 'as a durable image attachment the model can view.',
     parameters: {
-      fullPage: { type: 'boolean', description: 'Capture the full scrollable page instead of the viewport.' },
+      fullPage: { type: 'boolean', description: 'Full-page capture is unsupported by the native sidebar. Keep this false.' },
       ref: { type: 'string', description: 'Optional element ref to capture instead of the page.' },
     },
     output: { schema: SCREENSHOT_SCHEMA, render: renderScreenshotValue },
@@ -447,13 +448,12 @@ export function apply(ctx: Context, config: ToolConfig): void {
         mediaType: 'image/png',
         name: 'browser-screenshot.png',
       })
-      const url = (await session.snapshot()).url
       return {
         attachmentId: String(ref.attachmentId),
         bytes: ref.bytes,
         width: ref.width,
         height: ref.height,
-        url,
+        url: capture.url,
       }
     },
   }))
@@ -481,13 +481,13 @@ export function apply(ctx: Context, config: ToolConfig): void {
         throw new Error('browser_extract needs the llm service; the harness composition must mount @deepseek-ai/dsh-llm')
       }
       const session = await acquire(exec)
-      const data = await session.pageData()
+      const data = await session.pageData(exec.signal)
       const options: GenerateOptions = {
         provider,
         model,
         messages: [createUserMessage({
           content: [{ type: 'text', text: extractionPrompt(args.instruction, data) }],
-          source: { kind: 'plugin', plugin: name },
+          source: { kind: 'user' },
         })],
         system: 'You are a structured data extraction engine. Respond with exactly one JSON value and nothing else.',
         temperature: 0,
@@ -531,12 +531,12 @@ export function apply(ctx: Context, config: ToolConfig): void {
 
   ctx.tools.register(defineTool({
     name: p('close'),
-    description: 'Close this session\'s browser (all tabs and cookies). The next browser call starts a fresh session.',
+    description: 'Close this conversation\'s Agent Browser sidebar and its tabs. Use browser_navigate to open a fresh browser.',
     parameters: {},
     output: { schema: { type: 'null' }, render: (_args, _value) => [{ type: 'text', text: 'Browser session closed.' }] },
     async execute(_args, exec) {
       const session = await acquire(exec)
-      await session.close()
+      await session.close(exec.signal)
       return null
     },
   }))

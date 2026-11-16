@@ -105,7 +105,7 @@ export default class BrowserRuntime extends Service {
     const registered = [...providers.values()]
     const [single] = registered
     if (single === undefined) {
-      throw new BrowserError('NO_PROVIDER', 'no browser provider is registered; mount the playwright entry of this package')
+      throw new BrowserError('NO_PROVIDER', 'no sidebar browser provider is registered for this profile')
     }
     if (registered.length > 1) {
       throw new BrowserError('AMBIGUOUS_PROVIDER', 'multiple browser providers are registered (' + registered.map(p => p.id).join(', ') + '); configure one explicitly')

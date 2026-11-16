@@ -119,7 +119,7 @@ export const SNAPSHOT_SCRIPT: string = String.raw`
     const title = el.getAttribute('title')
     if (title && title.trim()) return clip(title.trim(), maxName)
     const tag = el.tagName.toLowerCase()
-    if (tag === 'input' || tag === 'button') {
+    if (tag === 'button' || (tag === 'input' && /^(button|submit|reset)$/.test(el.type))) {
       const value = el.getAttribute('value')
       if (value && value.trim()) return clip(value.trim(), maxName)
     }
@@ -247,9 +247,7 @@ export const SNAPSHOT_SCRIPT: string = String.raw`
         const labelEl = el.closest('label')
         if (labelEl) label = (labelEl.textContent || '').replace(/\s+/g, ' ').trim()
       }
-      let value = el.value || ''
-      if (tag === 'select' && el.selectedOptions && el.selectedOptions[0]) value = el.selectedOptions[0].textContent
-      inputs.push({ tag, type: el.getAttribute('type') || '', name: el.getAttribute('name') || '', value, label: label.slice(0, 200), checked: tag === 'input' ? !!el.checked : null })
+      inputs.push({ tag, type: el.getAttribute('type') || '', name: el.getAttribute('name') || '', label: label.slice(0, 200), checked: tag === 'input' ? !!el.checked : null })
     }
     return {
       url: location.href,

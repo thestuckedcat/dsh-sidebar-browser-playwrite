@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { assertAllowedUrl } from '../src/playwright.ts'
+import { assertAllowedUrl } from '../src/url-policy.ts'
 import { BrowserError } from '../src/errors.ts'
 
 test('http and https pass', () => {
@@ -16,6 +16,10 @@ test('non-http schemes fail loudly', () => {
 
 test('invalid URLs fail', () => {
   assert.throws(() => assertAllowedUrl('not a url', []), (err: unknown) => err instanceof BrowserError && err.code === 'URL_NOT_ALLOWED')
+})
+
+test('URLs containing user information are refused', () => {
+  assert.throws(() => assertAllowedUrl('https://user:secret@example.com'), { code: 'URL_NOT_ALLOWED' })
 })
 
 test('allowedDomains restricts hosts, subdomains included', () => {

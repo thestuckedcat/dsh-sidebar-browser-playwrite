@@ -4,17 +4,8 @@ import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import BrowserRuntime from '../src/service.ts'
-import { PlaywrightProvider } from '../src/playwright.ts'
-import type { PlaywrightConfig } from '../src/playwright.ts'
 import * as browserTool from '../src/tool.ts'
 import type { ToolConfig } from '../src/tool.ts'
-
-const pwConfig: PlaywrightConfig = {
-  launch: { channel: 'chrome', headless: true, viewport: { width: 1280, height: 800 }, navigationTimeoutMs: 5000, ignoreHTTPSErrors: false },
-  idleTimeoutMs: 0,
-  maxSessions: 2,
-  snapshot: { maxNodes: 200, maxNameLength: 120, maxTextLength: 300 },
-}
 
 const toolConfig: ToolConfig = {
   toolPrefix: 'browser_',
@@ -28,7 +19,6 @@ test('every browser tool registers with its schema in one assembled context', as
   await root.plugin(SystemPrompt)
   await root.plugin(ToolRuntime)
   await root.plugin(BrowserRuntime)
-  root.browser.registerProvider(new PlaywrightProvider(pwConfig))
   browserTool.apply(root, toolConfig)
 
   const names = root.tools.schemas().map(schema => schema.name).sort()
@@ -67,7 +57,6 @@ test('tool names respect the configured prefix', async () => {
   await root.plugin(SystemPrompt)
   await root.plugin(ToolRuntime)
   await root.plugin(BrowserRuntime)
-  root.browser.registerProvider(new PlaywrightProvider(pwConfig))
   browserTool.apply(root, { ...toolConfig, toolPrefix: 'web_' })
   assert.ok(root.tools.schemas().some(schema => schema.name === 'web_click'))
 })

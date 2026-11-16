@@ -1,173 +1,44 @@
-# dsh-browser-playwright
+# DSH Sidebar Browser
 
-Playwright-powered browser capability for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): the agent drives a real browser through **accessibility snapshots with stable element refs** — no CSS-selector guessing, no full-DOM dumps. One browser session per harness session, tabs, screenshots as durable image attachments, structured extraction, and gated JavaScript evaluation.
+面向 DeepSeek Harness Desktop 的原生侧栏浏览器。Agent 调用 `browser_navigate` 后，当前会话右侧出现 **Agent Browser**。Agent 的快照、点击、填表和截图都来自该 Electron 网页，用户可直接在页面上接手。依赖已安装的 DSH Desktop 0.2.1-rc.5。
 
-## Install
+## 安装
 
-```sh
-dsh plugin --profile <name> add dsh-browser-playwright
-```
-
-The bundle mounts three rows: the `ctx.browser` seam (`service`), the Playwright provider (`playwright`), and the model-facing tool family (`tool`).
-
-### Browser binary
-
-The provider probes `chromium` → `chrome` → `msedge` → `edge` channels automatically; any installed Chromium-family browser works with **zero download**. To use Playwright-managed Chromium instead:
+通过 DSH Desktop 的插件管理器添加 GitHub 源 `github:thestuckedcat/dsh-sidebar-browser-playwrite`，或使用桌面 profile 的命令行。若 DSH 提示 Git 源的构建需要批准，可按提示批准该包的构建脚本。
 
 ```sh
-npx playwright-core install chromium
-# Restricted networks (e.g. mainland China):
-PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright npx playwright-core install chromium
+dsh plugin --profile desktop add github:thestuckedcat/dsh-sidebar-browser-playwrite
 ```
 
-Or pin a binary: `launch.executablePath` / `launch.channel` in the plugin config.
-
-## Tools
-
-The default `toolPrefix` is `browser_`. Every action returns a fresh snapshot, so refs always come from the latest result.
-
-| Tool | Purpose |
-|---|---|
-| `browser_navigate` | Open a URL (http/https only) and return the snapshot |
-| `browser_snapshot` | Snapshot the current page: URL, title, visible elements with `ref=` ids |
-| `browser_click` | Click the element with a ref from the latest snapshot |
-| `browser_fill` | Replace an input's value; selects match by option label |
-| `browser_press` | Press a key (Enter, Tab, Escape, ArrowDown, …) on an element |
-| `browser_scroll` | Scroll the page or bring a ref into view |
-| `browser_back` / `browser_forward` | History navigation |
-| `browser_wait` | Wait a bounded duration for lazy content |
-| `browser_tabs` / `browser_open_tab` / `browser_switch_tab` / `browser_close_tab` | Tab management |
-| `browser_screenshot` | PNG capture stored as a durable image attachment the model can view |
-| `browser_extract` | Structured extraction: natural-language instruction → one parsed JSON value |
-| `browser_evaluate` | Run one JavaScript expression in the page (disabled by default) |
-| `browser_close` | Close the session's browser; the next call opens a fresh one |
-
-### Snapshot example
-
-```text
-URL: https://example.com/
-Title: Example Domain
-Refs: 12
-
-- navigation "Main"
-  - link "Home" [ref=e1] -> /
-  - button "Go" [ref=e2]
-- heading "Welcome" [level=1]
-- textbox "Search" [ref=e3]
-```
-
-The model then calls `browser_click` with `ref: e2`. Invisible content is excluded, node and text caps bound the token cost, and truncation is flagged in the result.
-
-## Configuration
-
-All tunables are patchable through the profile's `cordis.patch.yml` (later layers win per row).
-
-```yaml
-- id: browser
-  config:
-    provider: playwright                # explicit provider selection
-
-- id: browser-playwright
-  config:
-    launch:
-      channel: chrome                   # or chromium / msedge / edge
-      headless: true
-      viewport: { width: 1280, height: 800 }
-      navigationTimeoutMs: 30000
-      ignoreHTTPSErrors: false
-    allowedDomains: []                  # e.g. ['github.com'] restricts navigation
-    idleTimeoutMs: 600000               # close idle contexts after 10 min; 0 = never
-    maxSessions: 8                      # LRU eviction beyond this
-    snapshot:
-      maxNodes: 500                     # token budget per snapshot tree
-      maxNameLength: 120
-      maxTextLength: 300
-
-- id: browser-tool
-  config:
-    toolPrefix: browser_                # model-facing tool name prefix
-    allowEvaluate: false                # browser_evaluate gate
-    maxWaitMs: 60000                    # browser_wait bound
-    extract:
-      provider: deepseek-official       # optional: enables browser_extract
-      model: deepseek-v4-flash
-      maxInputChars: 20000
-      maxOutputTokens: 2000
-```
-
-`browser_extract` needs an auxiliary LLM route (`extract.provider` + `extract.model`); without one it fails with an actionable error. `browser_evaluate` stays off until `allowEvaluate: true` because it executes arbitrary page JavaScript.
-
-## Architecture
-
-A swappable capability seam, one package:
-
-- `service` — `ctx.browser`: the provider registry with configured-or-auto selection semantics (a configured id must exist; one usable provider auto-selects; several require an explicit choice).
-- `playwright` — the provider: one shared browser, one `BrowserContext` per calling session, LRU eviction, idle disposal, URL policy, and the injected snapshot engine.
-- `tool` — the consumer: `defineTool`-built tools whose canonical values are structured JSON and whose rendered text is the snapshot tree.
-
-Other providers (remote browsers, Browserbase, Steel, …) can register into `ctx.browser`; the tool schemas stay unchanged. Browser sessions survive across tool calls and keep cookies, storage, and login state within one harness session.
-
-## Development
+也可以从源码构建 tarball，再通过桌面 profile 安装该归档。
 
 ```sh
-pnpm install
-pnpm test          # full suite: engine/action integration on real Chrome, policy, rendering,
-                   # schema assembly, plus the realistic scenario suites below
-pnpm run build     # tsc → lib/
+pnpm install --frozen-lockfile
+pnpm build
+pnpm pack
+dsh plugin --profile desktop add ./dsh-sidebar-browser-playwrite-0.2.0.tgz
 ```
 
-### Test suites
+已有其他插件占用 `browser_*` 工具名时，可通过 `sidebar-browser-tools` 行的 `toolPrefix` 改名。卸载时在同一 profile 移除 `dsh-sidebar-browser-playwrite`。
 
-| Suite | Command | What it covers |
-|---|---|---|
-| Unit + engine integration | `pnpm test` (included) | Snapshot rendering, schema assembly, URL policy, provider actions on real Chrome |
-| Realistic scenarios | `pnpm test:scenarios` | Scripted-agent journeys over a realistic local store fixture: guest checkout with coupon and validation, login/session persistence, multi-tab research, lazy content, infinite scroll, modal dialogs, popups, screenshots, policy, owner isolation, idle disposal, snapshot budgets — at both the `BrowserSession` level and the model-facing `ctx.tools.execute` level (with fake attachments/LLM services) |
-| Live smoke | `pnpm test:live` | Opt-in checks against the real internet (example.com, Wikipedia REST). Skipped unless `DSH_BROWSER_LIVE=1`; not part of CI |
+## 使用
 
-The scenario suites are the plugin's most realistic tests: they drive the browser the way an agent does — snapshot, find a `ref`, act, re-snapshot — and therefore double as executable documentation of the model experience.
+在 DSH Desktop 打开会话，再要求 Agent 打开 HTTP(S) 网页。导航工具返回快照和元素引用，Agent 可调用 `browser_click`、`browser_fill`、`browser_press` 等操作。切换会话后，工具只接收发起它的会话请求。关闭 Agent Browser 标签会释放其 guest，随后可用 `browser_navigate` 重新打开。
 
-From a DeepSeek Harness source checkout, load this plugin from TypeScript:
+- `browser_open_tab`、`browser_tabs`、`browser_switch_tab` 和 `browser_close_tab` 管理 Agent Browser 内的网页。
+- 截图支持当前视口和可见元素，完整滚动页截图与 `networkidle` 等待会返回不支持。Electron 导航等待完整页面加载。
+- 密码和文件输入由用户在网页中操作。结构化提取不读取表单值。
+- `browser_evaluate` 默认关闭，`browser_extract` 需要配置提取模型。提取会发送选定网页数据给所配置的模型。
+- `sidebar-browser-provider` 行的 `allowedDomains` 可限制工具导航和操作的目标域名。Electron 的网页网络策略仍由 DSH 主进程负责。
+
+## 开发与验证
 
 ```sh
-pnpm dsh web --patch ./browser-plugin/dev.cordis.yml
+pnpm test
+pnpm build
+node scripts/smoke-desktop.cjs "E:/dsh/DeepSeek Harness.exe"
 ```
 
-## Model Experience
+桌面测试使用独立 DSH profile、已安装的 Electron 外壳和本机合成页。实现细节和已验证范围见 [机制说明](docs/mechanisms.md)。
 
-### Tool schemas
-
-The 17 tool schemas join the system-prompt assembly through `ctx.tools.register()`; each carries a one-line task-oriented description. Snapshot results are bounded: at most `maxNodes` nodes, names capped at `maxNameLength`, and the truncation flag is explicit.
-
-#### Token effect
-
-One tool schema block per tool (small, fixed), plus per-call result text proportional to the visible page, capped by `snapshot.maxNodes` and name/text limits. Actions return a fresh snapshot, so interactive flows cost roughly one snapshot per step.
-
-#### KV Cache effect
-
-Tool schemas are static per registration and keep the prompt prefix stable. Result content varies with the page, invalidating reuse after each browser tool call, as with any tool result.
-
-### Browser state
-
-The page state itself (DOM, cookies, storage) lives in the browser context and never enters the prompt except through snapshot or page-data results.
-
-## Known Limitations and Deferred Work
-
-- **Selector-free, not vision-free** — interaction is a11y-tree based; purely visual widgets (canvas, WebGL, custom-drawn controls) may expose no refs. `browser_screenshot` + an image-capable model is the fallback.
-- **Cross-origin iframes** appear as leaf `(frame)` nodes without refs; same-origin frames are walked up to two levels deep.
-- **Evaluate gate is config, not approval** — enabling `allowEvaluate` trusts the model with arbitrary page JavaScript; compose it with the harness approval/permission policy for stricter control.
-- **Chromium family only** — Firefox/WebKit channels are not probed; providers are swappable if another engine is needed.
-- **Extract needs a dedicated model route** — it does not reuse the main request's route; misconfiguration fails loudly at call time.
-- **JS-driven navigations are not statically checkable** — `allowedDomains` now covers `browser_navigate`, `browser_open_tab`, and link clicks, but a button whose handler runs `location.href = …` can still leave the allowed hosts; deploy an external network guard for hard isolation.
-
-### Ref and lifecycle safety (fixed)
-
-The scenario suites originally surfaced four hazards, now fixed and regression-tested:
-
-- **Stale refs fail fast** — refs carry a per-snapshot nonce, so after a client-side re-render a stale ref matches nothing and `browser_click` fails with `REF_NOT_FOUND` instead of silently acting on a different element.
-- **Link clicks respect `allowedDomains`** — clicking an in-page link to a disallowed host is rejected with `URL_NOT_ALLOWED`.
-- **Idle disposal defers during operations** — a navigation slower than `idleTimeoutMs` completes normally; disposal only fires when the session is truly idle.
-- **Mid-navigation snapshots settle** — a `browser_snapshot` racing a JS navigation waits for the new document and retries instead of surfacing a raw "Execution context was destroyed" error.
-
-## License
-
-MIT
+基于 [ChenyuHeee/dsh-browser-playwright](https://github.com/ChenyuHeee/dsh-browser-playwright) 的 MIT 许可工具接口和快照实现。版权声明见 [LICENSE](LICENSE)。
